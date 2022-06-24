@@ -1,0 +1,729 @@
+---
+title: "Global Exports - Time Series Analysis"
+subtitle: "Kay Royo"
+date: "5/30/22"
+output: 
+  rmdformats::readthedown:
+    highlight: kate
+---
+
+<style> #content{max-width:1800px;}</style>
+<style> p{max-width:800px;}</style>
+<style> li{max-width:800px;}</style
+
+
+
+```{r , include=FALSE}
+# knitr::opts_chunk$set(echo = TRUE)
+# ##Clear Compute Memory
+# knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r setup, include=TRUE}
+rm(list=ls()) #clean up workspace
+library(knitr) #load library 
+
+knitr::knit_engines$set(python = reticulate::eng_python) #set engine 
+```
+
+```{r, include = TRUE, warning = FALSE, message=FALSE}
+library(reticulate) #load library
+reticulate::repl_python()
+
+# use_condaenv(condaenv = 'r-reticulate')
+# #repl_python() #activate python repl to run python codes 
+# 
+python <- "~/.virtualenvs/python-3.10.4-venv/bin/python" #set virtual env
+if (file.exists(python))
+  use_python(python, required = TRUE) #require python
+```
+
+# **Introduction** 
+
+<span style='color:black'> 
+
+
+
+</span>
+
+***
+
+# **Introduction**
+
+<span style='color:black'> 
+The primary goal of this project is to analyze and forecast the *Central African Republic Exports* time series data, which includes a sequence of measurements of the same variables made over time. The Central African Republic heavily relies on its exports such as diamonds (40 percent of total exports) , coffee, cotton, and timber (16 percent of total exports) . According to [tradingeconomics.com](https://tradingeconomics.com/central-african-republic/exports), Belgium, China, Congo, France and Japan are Central African Republic's main export partners. Since the economy of Central African Republic heavily depends on exports, it is important to conduct a time series analysis of the data in order to predict its future outlook. 
+
+Primary Question of Interest: 
+
+- What does the forecast of the *Central African Republic Exports* look like in the future? 
+
+</span>
+
+***
+
+
+# **Data**
+
+<span style='color:black'> 
+
+This project is focused on yearly Central African Republic Exports time series data which includes yearly records from from 1960 to 2017. This dataset contains 9 variables including Country, Country Code, Year, GDP, Growth, CPI, Imports, Exports, and Population. Additionally, it contains a total 58 observations or yearly records for 58 years. The dataset and its summary are displayed in the tables below. 
+
+</span>
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidyr)
+#read data
+load("finalproject.Rdata")
+```
+
+## Preprocessing 
+
+<span style='color:black'> 
+The tables below show the data and the summary of its variables with the missing values replaced by the mean of the variable they belong to. 
+</span>
+
+```{r, echo = FALSE,  message=FALSE, warning=FALSE}
+#replace na values from data with mean value 
+
+finalPro_data$Growth <- finalPro_data$Growth %>% replace_na(mean(finalPro_data$Growth, na.rm=TRUE))
+
+finalPro_data$CPI <- finalPro_data$CPI %>% replace_na(mean(finalPro_data$CPI, na.rm=TRUE))
+
+write.csv(finalPro_data$Exports,"exports.csv", row.names = FALSE)
+```
+
+```{r, echo = FALSE, , message=FALSE, warning=FALSE}
+##View data
+library(DT)
+datatable(finalPro_data, caption = htmltools::tags$caption(
+                  style = 'caption-side: bottom; text-align: center;',
+                  'Table 1: ', htmltools::em('Central African Republic Exports'), rownames = FALSE,filter="top", options = list(pageLength = 5, autoWidth = TRUE, scrollX=F, columnDefs = list(list(width = '50px', targets = "_all")))))
+```
+
+
+```{r, echo = FALSE, fig.height =6, results='asis', message=FALSE, warning=FALSE}
+#view summary
+library(summarytools)
+print(dfSummary(finalPro_data), method = "render")
+```
+
+
+
+***
+
+# **Preliminary Analysis**
+
+<span style='color:black'> 
+
+Before fitting the time series model, a preliminary analysis is performed in order to determine if the time series data for the variable *Exports* does not violate proper assumptions for methods in time series analysis including stationarity, constant mean, and constant variance. The conditions of stationarity that be met, in order to use time series methods are listed as follows. 
+
+- The mean value of time-series is constant over time, which implies, the trend component is nullified.
+
+- The variance does not increase over time.
+
+- Seasonality effect is minimal.
+
+</span>
+
+
+## Data Visualization
+
+<span style='color:black'>
+The time plot in Figure 1 shows some non-stationarity, with an overall decline. There appears to be an improvement in 1994 but it is followed by further economic decline after 1997. The plot does not show any strong evidence of changing variance, so doing a Log or Box-Cox transformation is not necessary. In addition, it appears that the time series is non-stationary due to trends and changing levels. However, this is further proven below. 
+</span>
+
+```{r, echo = FALSE,  fig.cap= "Figure 1: Exports of the Central African Republic",out.extra='angle=90', message=FALSE, warning=FALSE}
+library(ggplot2)
+library(plotly)
+#library(ggfortify)
+library(forecast)
+
+#convert to a python object 
+dt_py <- r_to_py(finalPro_data$Exports)
+
+#convert to time series 
+ts_df <-ts(finalPro_data, start = min(finalPro_data$Year), end = max(finalPro_data$Year), frequency = 1)
+
+#plot ts 
+q <- forecast::autoplot(ts_df[,'Exports'], alpha = 0.5, color = 'red') +
+  labs(title="Central African Republic exports",
+       y="Exports")
+(q<-ggplotly(q)%>%
+  layout(plot_bgcolor='#e5ecf6', 
+         xaxis = list( 
+           zerolinecolor = '#ffff', 
+           zerolinewidth = 2, 
+           gridcolor = 'ffff'), 
+         yaxis = list( 
+           zerolinecolor = '#ffff', 
+           zerolinewidth = 2, 
+           gridcolor = 'ffff')))
+```
+
+
+
+
+## ACF and PACF 
+
+<span style='color:black'>
+The autocorrelation function (ACF), $\hat \rho (h)$, which is the correlation between time series with a lagged version of itself, and partial autocorrelation function (PACF) or the conditional correlation of the time series with a lag of itself with the linear dependence of all the lags between them removed, both assume stationarity of the underlying time series. By using the ACF and PACF, an appropriate forecasting method or model can be selected.  
+
+Using the ACF shown in Figure 2 below, it is evident that the time series data *Exports* is non-stationary since the ACF is slowly decreasing and mostly remains above the significance range, which is shown as the blue dashed line in the plot. The first PACF of *Exports* $\hat\rho_{11} \approx 1$, which is indicative of non-stationarity. Thus, it can be concluded that  *Exports* is non-stationary using the ACF and PACF plots below and methods such as differencing and transformations can be implemented to transform it into a stationary form. 
+</span>
+
+```{r, echo = FALSE,  fig.cap= "Figure 2: Time plot, ACF, and PACF plots for the Central African Republic Exports",fig.align='center',out.extra='angle=90', message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tsibble)
+library(dplyr)
+library(forecast)
+library(feasts)
+
+#acf(ts_df[,'Exports'])
+
+#convert data to tidy time series object (tsibble)
+
+tidyts_dt <- ts_df[,'Exports']%>% as_tsibble()
+
+gg_tsdisplay(tidyts_dt, plot_type = c("partial"), lag_max = NULL) # autocorrelation
+
+```
+
+
+
+## Stationarity  
+
+<span style='color:black'>
+In order to further determine if the time series *Exports* is stationary, the *Augmented Dickey-Fuller* (ADF) test can be performed. The following can be used to identify if the time series is indeed stationary. 
+
+- p-value $> 0.05$: Fail to reject the null hypothesis ($H_0$), the data has a unit root and is non-stationary
+
+- p-value $\le 0.05$: Reject the null hypothesis ($H_o$) and accept the alternative hypothesis  ($H_a$), the data does not have a unit root and is stationary
+
+Since the  p-value $= 0.1006 \gt 0.05$ using ADF test, it can be concluded that *Exports* is non-stationary. 
+
+Another numerical method that can be used to check for the stationarity of *Exports*  is the *Kwiatkowski-Phillips-Schmidt-Shin* (KPSS) Test for Stationarity. 
+
+- p-value $< 0.05$: Fail to reject the null hypothesis ($H_0$), the data has a unit root and is non-stationary
+
+- p-value $\ge 0.05$: Reject the null hypothesis ($H_o$) and accept the alternative hypthesis  ($H_a$), the data does not have a unit root and is stationary
+
+Since the  p-value $= 0.01 \lt 0.05$ using KPSS test, it can be concluded that *Exports* is non-stationary. 
+
+</span>
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+library(tseries)
+adf.test(ts_df[,'Exports']) # p-value < 0.05 indicates the TS is stationary
+kpss.test(ts_df[,'Exports'])
+```
+
+
+## Transformations
+
+<span style='color:black'> 
+In the previous part, it is determined that transformations are not necessary for the time series *Exports* since the time plot in Figure 1 does not show any evidence of changing variance. In order to eliminate any non-constant variance or heteroskedasticity, performing transformation is necessary. Therefore, it must be further investigated as shown below. 
+
+</span>
+
+### Log and Box-cox Transformation 
+
+<span style='color:black'> 
+
+The time plot of transformed and original *Exports* is shown below in Figure 3. This plot shows that transformation does not have a significant effect on the time series *Exports* since the three plots appear similar. Therefore, it can be concluded that transformation is not necessary. Additionally, the ACF and PACF of *Exports* transformed using log and Box-cox are similar to the ACF and PACF of non-transformed *Exports*, which further support this conclusion. 
+
+</span>
+
+```{r,  echo = FALSE, eval = FALSE, message=FALSE, warning=FALSE}
+logts <- log(ts_df[,'Exports'])
+
+#plot ts 
+g <- forecast::autoplot(logts, alpha = 0.5, color = 'springgreen') +
+  labs(title="Central African Republic logged exports (Log)",
+       y="Exports (Log)")
+# g <- ggplotly(g)
+# subplot(g,q, nrows = 2, shareX=T, titleY = TRUE)%>%
+#   layout(plot_bgcolor='#e5ecf6', 
+#          xaxis = list( 
+#            zerolinecolor = '#ffff', 
+#            zerolinewidth = 2, 
+#            gridcolor = 'ffff'), 
+#          yaxis = list( 
+#            zerolinecolor = '#ffff', 
+#            zerolinewidth = 2, 
+#            gridcolor = 'ffff'))
+```
+
+```{r, echo = FALSE, fig.cap="Figure 3: Transformed Exports of the Central African Republic" ,fig.align='center',message=FALSE, warning=FALSE}
+
+#Log transformation 
+logts <- log(ts_df[,'Exports'])
+
+#plot ts 
+g <- forecast::autoplot(logts, alpha = 0.5, color = 'springgreen') +
+  labs(title="Central African Republic logged exports (Log)",
+       y="Exports (Log)")
+
+#Box cox transformation
+lambda <- BoxCox.lambda(ts_df[,'Exports']) #optimal lambda 
+cat("optimal lambda:", lambda)
+
+#plot ts 
+b <- forecast::autoplot(BoxCox(ts_df[,'Exports'], lambda = lambda), alpha = 0.5, color = 'dodgerblue') +labs(title="", y="Exports (Box-cox)")
+b<-ggplotly(b)
+
+subplot(b,g,q, nrows = 3, shareX=T, titleY = TRUE)%>%
+  layout(plot_bgcolor='#e5ecf6', 
+         xaxis = list( 
+           zerolinecolor = '#ffff', 
+           zerolinewidth = 2, 
+           gridcolor = 'ffff'), 
+         yaxis = list( 
+           zerolinecolor = '#ffff', 
+           zerolinewidth = 2, 
+           gridcolor = 'ffff'))
+
+```
+
+#### Log ACF and PACF
+
+```{r, echo = FALSE,  fig.cap= "Figure 4: Time plot, ACF, and PACF plots for the transformed Central African Republic Exports",fig.align='center',out.extra='angle=90', message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tsibble)
+library(dplyr)
+library(forecast)
+library(feasts)
+
+
+tidyts_dt <- log(ts_df[,'Exports'])%>% as_tsibble()
+
+gg_tsdisplay(tidyts_dt, plot_type = c("partial"), lag_max = NULL) # autocorrelation
+
+```
+
+
+
+#### Box-cox ACF and PACF
+
+```{r, echo = FALSE,  fig.cap= "Figure 5: Time plot, ACF, and PACF plots for the transformed Central African Republic Exports",fig.align='center',out.extra='angle=90', message=FALSE, warning=FALSE}
+tidyts_dt <- BoxCox(ts_df[,'Exports'], lambda = lambda)%>% as_tsibble()
+
+gg_tsdisplay(tidyts_dt, plot_type = c("partial"), lag_max = NULL) # autocorrelation
+
+```
+
+## Decompose 
+
+<span style='color:black'>
+The time series *Exports* has only one seasonal cycle since it is a yearly data. Therefore, decomposing it is not necessary. However, if the seasonal cycle of *Exports* is 2 the trend, seasonality and error would appear as shown in Figure 6 below. For this project, the data is analyzed as non-seasonal. 
+</span>
+
+```{r, echo = FALSE, fig.cap= "Figure 6: Decomposition of Additive Exports",fig.align='center', message=FALSE, warning=FALSE}
+#convert to time series 
+ts_df2 <-ts(finalPro_data, start = min(finalPro_data$Year), end = max(finalPro_data$Year), frequency = 2)
+decomposedRes <- decompose(ts_df2[,'Exports'], type="additive") # use type = "additive" for additive components
+plot(decomposedRes) # see plot below
+```
+
+
+
+
+## Differencing
+
+### Firs-order difference 
+
+<span style='color:black'>
+In order to address the non-stationarity in *Exports* identified using the methods in the previous part, the first-order difference of the data can be used such that $y'_t = y_t - y_{t-1}$, which is is the change between consecutive observations in the original series *Exports*. The differenced time series *Exports* is shown in Figure 7 below, which only includes $T-1$ values since it is not possible to compute the difference $y'_t$ for the first observation. 
+
+
+Figure 7 shows that *Exports* now appear to be stationary. The ACF  below shows exponential decay, which is indicative of a stationary time series. The PACF shown in Figure 7 suggests an AR(2) model for the *Exports* since the PACF is tailing off at lag 2 where there are two spikes outside the threshold limit (blue dashed line). Hence, an ARIMA(2,1,0) is an initial candidate model. Meanwhile, the ACF suggests an MA(3) model since the ACF is cutting off sharply at lag 3 and negative at lag 1. Therefore, an alternative candidate is an ARIMA(0,1,3).
+</span>
+
+```{r, echo = FALSE, fig.cap= "Figure 7: Time plot, ACF,  and PACF plots for the differenced Central African Republic Exports",fig.align='center',out.extra='angle=90', message=FALSE, warning=FALSE}
+tidyts_dt1 <- diff(ts_df[,'Exports'])%>% as_tsibble()
+
+gg_tsdisplay(tidyts_dt1, plot_type = c("partial"), lag_max = NULL) # autocorrelation
+```
+
+
+
+<span style='color:black'>
+By conducting the KPSS test on the differenced *Exports* time series data, it can be further proven whether the differenced time series is indeed stationary. Based on the results shown below using the KPSS test,  p-value = 0.1, which is greater than the significance level, 0.05, so the alternative hypothesis is accepted and it can be concluded that the differenced time series data is stationary. 
+</span>
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+#adf.test(diff(ts_df[,'Exports'])) # p-value < 0.05 indicates the TS is stationary
+kpss.test(diff(ts_df[,'Exports'])) # p-value > 0.05 indicates the TS is stationary
+```
+
+# **Model Fitting and Diagnostics**
+
+<span style='color:black'>
+The combination of differencing, autoregression (AR), and a moving average (MA) model produce non-seasonal AutoRegressive Integrated Moving Average (ARIMA) model that can be written as 
+
+$$y'_t = c + \phi y'_{t-1}+\cdots+\phi_p y'_{t-p} + \theta w_{t-1}+\cdots+\theta_q w_{t-q} + w_t$$
+
+, which is an ARIMA($p,d,q$) model where 
+
+- $y'_t$ is the first-order differenced time series *Exports* that can be defined as $y^{'}_t = (1-B)^dy_t$
+
+- lagged values of $y_t$ and lagged errors or white noise $w_t$ are the predictors
+
+- $c$  is the average of the changes between consecutive observations 
+  
+  - $c = \mu(1-\phi_1 - \cdots - \phi_p)$ where $\mu$ is the mean of $(1-B)^d y_t$
+
+  - positive $c$ = increase in $y_t$ and negative $c$ = decrease in $y_t$ 
+
+- $p$ is the order of the autoregressive part
+
+- $q$ is the order of the moving average part
+
+- $d$ is the degree of differencing used 
+
+- $\phi_1 ,\cdots, \phi_p \ne0$ and $\theta_1,\cdots,\theta_q \ne 0$ are constants 
+
+The concise form of the model can be written as $\phi (B)y'_t= \theta (B)w_t$ or $\phi (B) (1-B)^dy_t= c + \theta (B)w_t$ where $B$ is a backshift operator and 
+
+- $\phi (B) = (1 - \phi_1B - \cdots - \phi_p B^p)$ is a $p^{th}$-order polynomial in $B$
+
+
+- $\theta (B) = (1 + \theta_1B + \cdots + \theta_p B^p)$ is a $q^{th}$-order polynomial in $B$
+
+In backshift notation the model can rewritten as 
+
+$$(\phi_1B - \cdots - \phi_p B^p) (1-B)^d y_t = c + (1 + \theta_1B + \cdots + \theta_p B^q)w_t$$
+
+The following sections below show the results from fitting ARIMA(0,1,3) and ARIMA(2,1,0), which are the proposed model using the methods in the previous sections. An automated model selection is also performed to determine the best method to use for forecasting the time series data *Exports*. 
+</span>
+
+## *ARIMA(2,1,0) with drift*
+
+<span style='color:black'>
+The results of fitting the proposed ARIMA(2,1,0) model with dift or mean is shown below. The ACF plot in Figure 8.1 of the residuals from the ARIMA(2,1,0) model shows that most autocorrelations are within the threshold limits, which indicates that the residuals are behaving like white noise. However, the ACF has a somewhat significant spike at lag 8. Therefore, this model may not be good when compared to other possible models. In addition, the Ljung-Box test, which is a test for a group of autocorrelations (portmanteau test),  returns large values of $Q^* = 10.7$ and p-value $=0.1198 \gt 0.05$, also suggesting that the residuals are white noise since we fail to reject the null hypothesis of the test and conclude that the data values are independent. The ARIMA(2,1,0) with non-zero mean can be defined as follows. 
+
+$$y_t = c - 0.5230y_{t-1}-0.3065y_{t-2} + w_t$$
+where $c=-0.2120[1-(- 0.5230)-(-0.3065)]= -0.387854$ and $w_t$ is white noise with standard deviation $\sqrt{6.675}\approx2.58$
+</span>
+
+```{r, echo = FALSE, fig.cap= "Figure 8.1: Residual plots for the ARIMA(2,1,0) model with drift",fig.align='center',message=FALSE, warning=FALSE}
+library(forecast)
+exports <- finalPro_data$Exports
+fit210  <- Arima(ts_df[,'Exports'], order=c(2,1,0), include.constant= TRUE)
+summary(fit210)
+checkresiduals(fit210, plot = TRUE)
+```
+
+<span style='color:black'>
+Using the python package `statsmodels` to fit the ARIMA(2,1,0) with drift model, the following results are generated. The coefficient of the $AR_1$ term is -0.5230 and the p-value in `P>|z|` column is highly significant since it is less than significance level 0.05. Similarly, the coefficient of the $AR_2$ term, which is -0.3066, is also significant but less significant than $AR_1$ term with p-value slightly less than $0.05$. However, the drift or $X1$ in the table below is insignificant with p-value = 0.309, which is much greater than 0.05.Therefore, the model can be fitted without the mean or drift. 
+</span>
+
+```{python, echo = FALSE, message=FALSE, warning=FALSE}
+import statsmodels
+from statsmodels.tsa.arima.model import ARIMA
+
+# 2,1,0 ARIMA Model
+model = ARIMA(r.dt_py, order=(2,1,0), trend = 't')
+model_fit = model.fit()
+print(model_fit.summary())
+```
+## *ARIMA(2,1,0)*
+
+<span style='color:black'>
+Based on the results shown below, fitting the ARIMA(2,1,0) model without the constant lowers the AIC, AICc, and BIC. However, it increased the log-likelihood and standard deviation $\sigma$. It also increased the errors: RMSE, MAE, MAPE, MASE. Despite this, it removed the spike at lag 8 in the ACF, which is now inside the threshold limit. The residuals are also still normally distributed. The p-values of the two $AR$ terms are also both significant. Thus, the constant can be excluded from the model. The ARIMA(2,1,0) with zero constant can be defined as follows. 
+
+$$y_t = -0.5050y_{t-1}-0.2897y_{t-2} + w_t$$            
+where $w_t$ is white noise with standard deviation $\sqrt{6.706}\approx 2.59$.
+
+</span>
+
+
+```{r, echo = FALSE, fig.cap= "Figure 8.2: Residual plots for the ARIMA(2,1,0) model",fig.align='center',message=FALSE, warning=FALSE}
+library(forecast)
+exports <- finalPro_data$Exports
+fit210  <- Arima(ts_df[,'Exports'], order=c(2,1,0), include.constant= FALSE)
+summary(fit210)
+checkresiduals(fit210, plot = TRUE)
+```
+
+```{python, echo = FALSE, message=FALSE, warning=FALSE}
+# 2,1,0 ARIMA Model
+model = ARIMA(r.dt_py, order=(2,1,0))
+model_fit = model.fit()
+print(model_fit.summary())
+```
+
+<span style='color:black'>
+In Figure 8.3 below, The two red dots represent the roots of the polynomials $\phi(B)$.  The fitted ARIMA(2,1,0) model is stationary since all the red dots are inside the unit circle. Additonally, the roots are far away from the unit circle, which suggests that they are numerically stable and would be useful for forecasting.   
+</span>
+
+```{r, echo = FALSE, fig.cap= "Figure 8.3: Inverse characteristic rootsfor the ARIMA(2,1,0) model",fig.align='center',message=FALSE, warning=FALSE}
+autoplot(fit210)
+```
+
+
+## *ARIMA(0,1,3) with drift*
+
+<span style='color:black'>
+The results of fitting the proposed ARIMA(0,1,3) model is also shown below. The ACF plot of the residuals in Figure 9.1 from the ARIMA(0,1,3) model shows that all autocorrelations are within the threshold limits, which indicates that the residuals are behaving like white noise. Moreover, the Ljung-Box test returns a large p-value= 0.4368, also suggesting that the residuals are white noise. The log-likelihood, AIC, and BIC are approximately equivalent to the fitted ARIMA(2,1,0) model above. The ARIMA(0,1,3) with non-zero mean can be defined as follows. 
+
+$$y_t = c -0.4537 w_{t-1} + 0.0922w_{t-2}  + 0.2677w_{t-3} + w_t$$
+
+where $c=-0.1999$ and $w_t$ is white noise with standard deviation $\sqrt{6.611}\approx2.57$
+</span>
+
+```{r, echo = FALSE,  fig.cap= "Figure 9.1: Residual plots for the ARIMA(0,1,3) model with drift",fig.align='center', message=FALSE, warning=FALSE}
+fit013  <- Arima(ts_df[,'Exports'], order=c(0,1,3), include.constant= TRUE)
+summary(fit013)
+checkresiduals(fit013)
+```
+
+<span style='color:black'>
+The following results are generated using `statsmodels` to fit the ARIMA(0,1,3) model with drift. The coefficient of the $MA_1$ term is -0.4537 and the p-value in `P>|z|` column is highly significant since it is less than significance level 0.05. However, the coefficient of the $MA_2$ term, which is 0.0922, is not significant with p-value = 0.514, which is greater than 0.05. The $MA_3$ term is also significant with coefficient = 0.2677 and p-value=0.05. However, the drift or $X1$ in the table below is insignificant with p-value = 0.523, which is much greater than 0.05.Therefore, the model can be fitted with two $MA$ terms and without the mean or drift. 
+</span>
+
+```{python, echo = FALSE, message=FALSE, warning=FALSE}
+# 0,1,3 ARIMA Model
+model = ARIMA(r.dt_py, order=(0,1,3), trend = 't')
+model_fit = model.fit()
+print(model_fit.summary())
+```
+
+## *ARIMA(0,1,2)*
+
+<span style='color:black'>
+Based on the results shown below, fitting the ARIMA(0,1,2) model without the constant lowers the AIC, AICc, and BIC. However, it increased the log-likelihood, standard deviation $\sigma$, RMSE, MAE, MAPE, and MASE. It also resulted in a spike at lag 8 in the ACF, which is now very close to the threshold limit but still inside it. The residuals are also still normally distributed. The p-values of the two $MA$ terms are also both significant. Therefore, the constant can be excluded from the model and the number of $MA$ terms can be reduced to two. The ARIMA(0,1,2) with zero constant can be defined as follows. 
+
+$$y_t =  -0.5847w_{t-1}+0.2873w_{t-2} + w_t$$            
+
+where $w_t$ is white noise with standard deviation $\sqrt{6.837}\approx 2.61$.
+</span>
+
+```{r, echo = FALSE,  fig.cap= "Figure 9.2: Residual plots for the ARIMA(0,1,2) model",fig.align='center', message=FALSE, warning=FALSE}
+fit012  <- Arima(ts_df[,'Exports'], order=c(0,1,2), include.constant= FALSE)
+summary(fit012)
+checkresiduals(fit012)
+```
+
+```{python, echo = FALSE, message=FALSE, warning=FALSE}
+# 0,1,2 ARIMA Model
+model = ARIMA(r.dt_py, order=(0,1,2))
+model_fit = model.fit()
+print(model_fit.summary())
+```
+
+<span style='color:black'>
+The three red dots in Figure 11.2 below correspond to the roots of the polynomials $\theta(B)$.  The fitted ARIMA(0,1,3) model is invertible since all the roots are inside the unit circle.  
+</span>
+
+```{r, echo = FALSE, fig.cap= "Figure 9.3: Inverse characteristic rootsfor the ARIMA(0,1,2) model",fig.align='center',message=FALSE, warning=FALSE}
+autoplot(fit012)
+```
+
+## *Auto selection*
+
+<span style='color:black'>
+Using automated model selection, the best model identified is ARIMA(2,1,0) with drift, which is one of the candidate models identified by looking at the ACF and PACF of the differenced time series *Exports* in the previous section. The results for fitting the ARIMA(2,1,0) model is also shown below, which is similar to the plot shown in Figure 8.1. In figure 10, the ACF plot of the residuals from the ARIMA(2,1,0) model shows that all autocorrelations are within the threshold limits, which indicates that the residuals are behaving like white noise. In addition, the Ljung-Box test returns a large p-value $= 0.1198 > 0.05$, also suggesting that the residuals are white noise. The log-likelihood, AIC, and BIC are similar to the fitted ARIMA(0,1,3) model above. 
+</span>
+
+```{r, echo = FALSE,  fig.cap= "Figure 10: Residual plots for the autoselected ARIMA(2,1,0) with drift model",fig.align='center',message=FALSE, warning=FALSE}
+fit_auto <- auto.arima(ts_df[,'Exports'], d=1, stepwise=FALSE, include.mean= FALSE,seasonal=FALSE)
+summary(fit_auto)
+checkresiduals(fit_auto)
+```
+
+
+## *Stepwise selection*
+
+### *ARIMA(2,1,2) with drift*
+
+<span style='color:black'>
+Using stepwise selection, the best model identified is ARIMA(2,1,2) with drift. Similar to the ACF plots above, the ACF plot for ARIMA(2,1,2) shows that the residuals are white noise since all the autocorrelations are within the threshold limits (blue dashed line), which is further supported by the large p-value obtained using Ljung-Box test, which is greater than significance level = $0.05$. The log-likelihood, AIC, and BIC are also similar to the fitted models above.The ARIMA(2,1,2) with non-zero mean can be defined as follows. 
+
+$$y_t = c  -0.6722y_{t-1}-0.6989y_{t-2}+0.2273 w_{t-1} + 0.4558w_{t-2}   + w_t$$
+
+where $c=-0.2099[1-(-0.6722)-(-0.6989)]=-0.49769389$ and $w_t$ is white noise with standard deviation $\sqrt{6.446}\approx2.54$. 
+</span>
+
+```{r, echo = FALSE,  fig.cap= "Figure 11.1: Residual plots for the ARIMA(2,1,2) model",fig.align='center',message=FALSE, warning=FALSE}
+fit_auto <- auto.arima(ts_df[,'Exports'], d=1, stepwise=TRUE, include.mean= TRUE, seasonal=FALSE)
+
+summary(fit_auto)
+
+checkresiduals(fit_auto)
+
+```
+
+
+
+<span style='color:black'>
+The following results are generated using `statsmodels` to fit the ARIMA(2,1,2) model with drift. The drift or $X1$ in the table below is insignificant with p-value=0.409, which is much greater than 0.05. Thus, it can be excluded from the model. The coefficient of the $AR_1$ term is -0.6721 with p-value=0.002 so it is significant. The $AR_2$ term is also significant. Both the $MA$ terms appear to be insignificant with p-values greater than 0.05. Therefore, the model can be fitted with two $MA$ terms and without the mean or drift. Based on these results, an ARIMA model without drift and without $MA$ terms can be fitted. This model would be an ARIMA(2,1,0) without drift, which is fitted in the previous section. 
+</span>
+
+```{python, echo = FALSE, message=FALSE, warning=FALSE}
+
+# 2,1,2 ARIMA Model
+model = ARIMA(r.dt_py, order=(2,1,2), trend = 't')
+model_fit = model.fit()
+print(model_fit.summary())
+```
+
+<span style='color:black'>
+The two red dots in the left and right hand plot of Figure 11.2 below correspond to the roots of the polynomials $\phi(B)$ and $\theta(B)$, respectively. As expected, all the red dots are inside the unit circle. Hence, the fitted model is both stationary and invertible.  
+</span>
+
+```{r, echo = FALSE, fig.cap= "Figure 11.2: Inverse characteristic rootsfor the ARIMA(2,1,2) model",fig.align='center',message=FALSE, warning=FALSE}
+autoplot(fit_auto)
+```
+
+### *ARIMA(2,1,2)*
+
+<span style='color:black'>
+Using stepwise selection without including the mean, the best model identified is ARIMA(2,1,2) without drift. Similar to the ACF plots above, the ACF plot for ARIMA(2,1,2) shows that the normally-distributed residuals are white noise since all the autocorrelations are within the threshold limits, which is further supported by the large p-value obtained using Ljung-Box test, which is greater than significance level = $0.05$. The log-likelihood, standard deviation, AIC, AICc, and BIC are lower than the fitted ARIMA(2,1,2) model with drift above.The ARIMA(2,1,2) with zero mean can be defined as follows. 
+
+$$y_t = -0.6741y_{t-1} -0.7142y_{t-2}+0.2468w_{t-1} + 0.4831w_{t-2}   + w_t$$
+where $w_t$ is white noise with standard deviation $\sqrt{6.416}\approx2.53$.
+</span>
+
+```{r, echo = FALSE,  fig.cap= "Figure 11.1: Residual plots for the ARIMA(2,1,2) model",fig.align='center',message=FALSE, warning=FALSE}
+fit_auto <- auto.arima(ts_df[,'Exports'], d=1, stepwise=TRUE)
+
+summary(fit_auto)
+
+checkresiduals(fit_auto)
+
+```
+
+<span style='color:black'>
+Using a different package (`fable`) to choose the best model by stepwise selection, the same model is obtained as shown below. 
+</span>
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+library(fable)
+ts_df[,'Exports']%>%as_tsibble() %>%
+  model(arima = ARIMA(value, stepwise=TRUE)) %>%
+  report()
+```
+
+<span style='color:black'>
+Fitting the ARIMA(2,1,2) model without drift below, shows that both $MA$ terms are still insignificant with p-values greater than 0.05, which further supports that the $MA$ terms can be excluded and ARIMA(2,1,0) is an ideal model. 
+</span>
+
+```{python, echo = FALSE, message=FALSE, warning=FALSE}
+# 2,1,2 ARIMA Model
+model = ARIMA(r.dt_py, order=(2,1,2))
+model_fit = model.fit()
+print(model_fit.summary())
+```
+
+## *Model comparisons*
+
+<span style='color:black'>
+Using the errors in the table below, the best model can be identified based on accuracy. It appears that ARIMA(2,1,2) with drift is the best model with generally the largest log-likelihood and smallest errors (RMSE, MAE, MAPE,MASE). ARIMA(2,1,2) without drift has the lowest standard deviation and AIC. However, the constant and $MA$ terms in these two models are not statistically significant, which reduces them to an ARIMA(2,1,0) model. Thus, ARIMA(2,1,0) appears to be the best model with lower AICc and BIC compared to the other models. 
+
+Table 1: Model Comparisons 
+```{r table2, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+tabl <- "
+
+| Model                   | sigma-sq | log-likelihood | AIC    | AICc | BIC  | ME          | RMSE   | MAE    | MPE      | MAPE   | MASE    |
+|:-----------------------:|----------|----------------|--------|------|------|-------------|--------|--------|----------|--------|---------|
+| ARIMA(0,1,3) with drift | 6.611    |  -132.9        | 275.8  |276.97|286.01|-0.0001457588|2.457915|1.819249|-0.838046 |8.820526|0.8307526|
+| ARIMA(0,1,2)            | 6.837    |  -134.85       | 275.7  |276.15|281.83|-0.2728479   |2.546162|1.901068|-2.470839 |9.502337|0.8681151|
+| ARIMA(2,1,0) with drift | 6.675    |  -133.63       | 275.25 |276.02|283.43|0.02598873   |2.492864|1.844491|-1.00703  |8.930269|0.8422792|
+| ARIMA(2,1,0)            | 6.706    |  -134.27       | 274.54 |274.99|280.67|-0.3425155   |2.521754|1.867171|-2.968058 |9.136747|0.8526358|
+| ARIMA(2,1,2) with drift | 6.446    |  -131.69       | 275.38 |277.06|287.64|0.01876558   |2.403994|1.796644|-0.8271656|8.75963 |0.8204299|
+| ARIMA(2,1,2)            | 6.416    |  -132.1        | 274.2  |275.37|284.41|-0.2645835   |2.421275|1.821659|-2.327502 |8.929045|0.8318532|
+"
+cat(tabl) # output the table in a format good for HTML/PDF/docx conversion
+```
+
+</span>
+
+
+# **Forecasts** 
+
+<span style='color:black'>
+The following forecasts are obtained using ARIMA(2,1,0) that has the lowest  AICc and BIC values, shown in Figure 11. The forecasts are shown as a dark blue line, with the 80% prediction intervals as a dark blue shaded area, and the 95% prediction intervals as a light blue shaded area, which is given by $\hat y_{T+n|T} \pm \hat \sigma$ where $\hat \sigma$ is the standard deviation of the residuals or white noise. The forecasts below appear to follow a straight line. ARIMA(2,1,0) can be written as follows: 
+
+$$(1-\hat\phi_1B - \hat\phi_2B^2)(1-B)y_t = w_t$$
+where $\hat\phi_1=-0.5050$ and $\hat\phi_2=-0.2897$
+
+The left hand-side of the expression above can be expanded to obtain, 
+
+$\big[1-B-\hat\phi_1B+\hat\phi_1B^2-\hat\phi_2B^2 +  \hat\phi_2B^3 \big]y_t=w_t$
+
+$\big[1-(1+\hat\phi_1)B+(\hat\phi_1-\hat\phi_2)B^2 +  \hat\phi_2B^3 \big]y_t=w_t$
+
+Applying the backshift operator produces the following where $B^p = y_{t-p}$, 
+
+$y_t-(1+\hat\phi_1)y_{t-1}+(\hat\phi_1-\hat\phi_2)y_{t-2}+  \hat\phi_2y_{t-3}=w_t$
+
+$y_t = (1+\hat\phi_1)y_{t-1}-(\hat\phi_1-\hat\phi_2)y_{t-2}-  \hat\phi_2y_{t-3} +w_t$
+
+Replacing $t$ with $T+1$ in the subscript, 
+
+$y_{T+1} = (1+\hat\phi_1)y_{T+1-1}-(\hat\phi_1-\hat\phi_2)y_{T+1-2}-  \hat\phi_2y_{T+1-3} +w_{T+1}$
+
+$y_{T+1} = (1+\hat\phi_1)y_{T}-(\hat\phi_1-\hat\phi_2)y_{T-1}-  \hat\phi_2y_{T-2} +w_{T+1}$
+
+Assuming that there are observations up time $T$, the expression to be used for forecasting can be expressed as, 
+
+$\hat y_{T+1|T} = (1+\hat\phi_1)y_{T}-(\hat\phi_1-\hat\phi_2)y_{T-1}-  \hat\phi_2y_{T-2} +w_{T+1}$
+
+where $w_{T+1}=0$ since it is unknown 
+
+$\hat y_{T+1|T} = (1+\hat\phi_1)y_{T}-(\hat\phi_1-\hat\phi_2)y_{T-1}-  \hat\phi_2y_{T-2}$
+
+Thus, the general expression for forecasting the observation $T+n$ is 
+
+$$\hat y_{T+n|T} = (1+\hat\phi_1)y_{T+n-1|T}-(\hat\phi_1-\hat\phi_2)y_{T+n-2|T}-  \hat\phi_2y_{T+n-3|T}$$
+</span>
+
+```{r, echo = FALSE, fig.cap= "Figure 11: Forecast from ARIMA(2,1,0) model",fig.align='center',message=FALSE, warning=FALSE}
+Exports <- ts_df[,'Exports']
+fit210 <- Arima(Exports, order=c(2,1,0),include.mean= FALSE) #without drift 
+(forecast(fit210,h=10))
+autoplot(forecast(fit210,h=10))
+```
+
+<span style='color:black'>
+The following forecasts are also obtained using the most accurate model with the lowest errors identified in the previous section, ARIMA(2,1,2) with drift, shown in Figure 12. Since $c\ne 0$ and the difference order $d=1$,  the long-term forecasts go to a non-zero constant as shown below.
+</span>
+
+```{r, echo = FALSE, fig.cap= "Figure 12: Forecast from ARIMA(2,1,2) model",fig.align='center',message=FALSE, warning=FALSE}
+Exports <- ts_df[,'Exports']
+fit212  <- Arima(Exports, order=c(2,1,2),include.mean= TRUE) #with drift 
+(forecast(fit212,h=10))
+autoplot(forecast(fit212,h=10))
+```
+
+
+
+# **Conclusion**
+
+<span style='color:black'>
+Based on the results obtained, it appears that the best model with statistically significant terms and lowest AICc and BIC is ARIMA(2,1,0) without drift. Overall, it appears that the model predicts that the exports will be somewhat stable within the next 10 years without dramatic increases and declines. This suggests that the economy of Central African Republic won't have to suffer significantly from dramatic declines in its exports in the future but it also won't be as successful as it was in the 1970s anytime soon. However, unforeseeable events may affect this conclusion. 
+</span>
+
+
+
+***
+
+# **References**
+
+[Central African Republic Exports](https://tradingeconomics.com/central-african-republic/exports)
+
+[Forecast](https://search.r-project.org/CRAN/refmans/forecast/html/auto.arima.html)
+
+[Stat510](https://online.stat.psu.edu/stat510/lesson/3/3.1)
+
+***
+
+# **Appendix**
+
+[Github Repository](https://github.com/kayannr/exports_tsa)
+
+
+***
+
+
